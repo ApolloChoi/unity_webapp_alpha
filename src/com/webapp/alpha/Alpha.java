@@ -31,6 +31,7 @@ public class Alpha extends HttpServlet {
 	private static final String HTML_START = "<html><body>";
 	private static final String HTML_END = "</body></html>";
 	private Map<String, HtmlPage> pages;
+	private List<String> projects;
 	private Random projectSelector;
     /**
      * @throws MalformedURLException 
@@ -75,6 +76,9 @@ public class Alpha extends HttpServlet {
 		
 		// We also need a random object to select each project
 		projectSelector = new Random();
+		
+		// Lastly, we want to create another list of just each project name, just to save time later.
+		projects = new ArrayList<>(pages.keySet());
     }
 
 	/**
@@ -84,47 +88,91 @@ public class Alpha extends HttpServlet {
 		PrintWriter output = response.getWriter();
 		
 		Cookie[] cookies = request.getCookies();
-		// If there's one cookie here, then it's the one that we put here and it's a log of the to be seen projects
 		List<String> seenValues = null;
-		// System.out.println("Cookies: " + cookies.length);
-		// System.out.println();
+		String lastProject = "";
+		boolean bothCookies = false;
+		
+		// First, we want to check for cookies.
 		if(cookies != null) {
 			for(int i = 0; i < cookies.length; i++) {
 				Cookie cookie = cookies[i];
-				System.out.println(cookie.getName());
+				// System.out.println(cookie.getName());
 				if(cookie.getName().equals("projects_to_view")) {
 					String seenValuesAsString = cookie.getValue();
-					if(seenValuesAsString.equals("")) {
-						seenValues = new ArrayList<>(pages.keySet());
-					} else {
+					if(!seenValuesAsString.equals("")) {
 						String[] seenValuesAsStringArray = seenValuesAsString.split(",");
 						seenValues = Arrays.asList(seenValuesAsStringArray);
-						System.out.println("Old cookie found!");
-						System.out.println("Length of old cookie: " + seenValues);
+					}
+					if(bothCookies) {
 						break;
+					} else {
+						bothCookies = true;
+					}
+				}
+				if(cookie.getName().equals("lastProject")) {
+					lastProject = cookie.getValue();
+
+					if(bothCookies) {
+						break;
+					} else {
+						bothCookies = true;
 					}
 				}
 			}
 		}
+		// If we didn't find an old list, then we set a new one and remove the last project.
 		if(seenValues == null) {
-			seenValues = new ArrayList<>(pages.keySet());
+			seenValues = new ArrayList<>(projects);
 		}
 		
-		// Next, we choose a project.
-		int nextProject = projectSelector.nextInt(seenValues.size());
+		// Next, we choose a project. In doing so, we remove the last seen project to ensure we can't double up.
+		String proj = "";
+		boolean removedVal = seenValues.remove(lastProject);
+		while(proj.equals("") || !seenValues.isEmpty()) {
+			int nextProject = projectSelector.nextInt(seenValues.size());
+			proj = seenValues.get(nextProject);
+			seenValues.remove(nextProject);
+			if(!pages.containsKey(proj)) {
+				proj = "";
+			}
+		}
+		// If we did remove the last seen project, then we add it back in
+		if(removedVal) {
+			seenValues.add(lastProject);
+		}
 		
-		HtmlPage page = pages.get(seenValues.get(nextProject));
-		seenValues.remove(nextProject);
+		// If we didn't find a valid project, we have two choices.
+		if(proj.equals("")) {
+			// Either the list has things in it, which means that we have no choice but to repeat, since
+			//  it would mean that the only thing in the list in it is the one that we repeated.
+			//  This will occur if there's one project in the list. Then we're gonna have to return a project.
+			if(seenValues.isEmpty()) {
+				proj = seenValues.remove(0);
+				
+			// if the list doesn't have things in it, then the client has tampered with the cookie,
+			//  so we reset. If the client has tampered with the cookie, then they've violated the integrity
+			//  of the site, so we reset and start anew.
+			} else {
+				seenValues = new ArrayList<>(projects);
+				proj = seenValues.get(projectSelector.nextInt(seenValues.size()));
+			}
+		}
+		
+		// Next, load the page and return it
+		HtmlPage page = pages.get(proj);
 		
 		List<HtmlElement> div = page.getByXPath("//div[@class='block-region-content']");
 		HtmlElement content = div.get(0);
 		output.println(content.asXml());
 		
-		// Lastly, we generate the cookie to return.
+		// Lastly, we generate the cookies to return.
 		String newSeenValuesAsString = seenValues.toString();
 		Cookie retCookie = new Cookie("projects_to_view", newSeenValuesAsString);
 		retCookie.setPath("/");
+		Cookie lastProjectCookie = new Cookie("last_project", proj);
+		lastProjectCookie.setPath("/");
 		response.addCookie(retCookie);
+		response.addCookie(lastProjectCookie);
 		response.setContentType("text/html");
 	}
 
